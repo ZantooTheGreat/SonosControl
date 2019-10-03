@@ -11,3 +11,15 @@ I used this script as a base, and edited it to support the 'GetVolume' command, 
 Each device has a Name, IP, and VolumeLimit. When you run the script with the -auto switch, it polls the devices on the network every 10 seconds, and checks if the device is above the volume level set in the CSV file. If the volume is above the specified maximum, it immediately hits the endpoint to set the volume back down to the limit. I've set a limit for the main office to "just above background noise", and for the break room the limit is zero.
 
 The script is working perfectly and has already saved us from bleeding ears a few times this week. Whoever has been turning it up hasn't mentioned that the volume control doesn't seem to work anymore...
+
+
+Resources:
+
+Technet Documentation:
+https://gallery.technet.microsoft.com/SONOS-PowerShell-500c9878
+
+Reddit Post:
+https://www.reddit.com/r/sysadmin/comments/dc62ey/hate_loud_office_radio_as_much_as_my_team_does_we/
+
+Original PS article:
+https://msitproblog.com/2016/01/04/hacking-sonos-using-windows-powershell/
