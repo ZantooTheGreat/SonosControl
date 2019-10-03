@@ -1,0 +1,165 @@
+Param(
+    [Parameter(Mandatory=$false)]
+    [bool]$auto=$false
+)
+ 
+# example file --
+# Name,IP,VolumeLimit
+# "Sonos1","192.168.0.1",25
+# "Sonos2","192.168.0.2",0
+$devices = Import-Csv devices.txt
+ 
+# Port that is used for communication (Default = 1400)
+$port = 1400
+ 
+#Seconds between checks when running on auto mode
+$pollRate = 10
+ 
+#available commands. there are more but these are the only ones I care about
+$commands = [ordered]@{
+    "1" = "GetVolume"
+    "2" = "SetVolume"
+    "3" = "Mute"  
+    "4" = "Unmute"      
+}
+ 
+Function Set-Sonos {
+    Param(
+        [Parameter(Mandatory=$true,Position=0,valueFromPipeline=$true)]
+        [string]
+        $action,
+ 
+        [Parameter(Mandatory=$true,Position=1,valueFromPipeline=$true)]
+        [string]
+        $device,
+ 
+        [Parameter(Mandatory=$false,Position=2,valueFromPipeline=$true)]
+        [int]
+        $volume,
+ 
+        [Parameter(Mandatory=$false,Position=3,valueFromPipeline=$true)]
+        [bool]
+        $monitor
+    )
+ 
+    $d = $devices[$device-1]
+ 
+    $deviceName = $d.Name
+    $sonosIP = $d.IP
+    $limit = $d.VolumeLimit
+ 
+    Write-Host "Device: $deviceName, IP: $sonosIP, VolumeLimit: $limit"
+ 
+    $path = "/MediaRenderer/RenderingControl/Control"
+    $soapAction = "urn:schemas-upnp-org:service:RenderingControl:1#$action"
+    $requiredOptions = @{
+                            "SetVolume"= "<DesiredVolume>###DESIRED_VOLUME###</DesiredVolume>";
+                            "Mute"="<DesiredMute>1</DesiredMute>";
+                            "UnMute"="<DesiredMute>0</DesiredMute>";
+                            "GetVolume"="";
+                        }
+   
+    $options = $requiredOptions[$action]
+    $envelope = "<s:Envelope xmlns:s=`"http://schemas.xmlsoap.org/soap/envelope/`" s:encodingStyle=`"http://schemas.xmlsoap.org/soap/encoding/`"><s:Body><u:$action xmlns:u=`"urn:schemas-upnp-org:service:RenderingControl:1`"><InstanceID>0</InstanceID><Channel>Master</Channel>$options</u:$action></s:Body></s:Envelope>"    
+    $uri = "http://${sonosIP}:$port$path"
+   
+    # Section for special Actions
+    Switch ($action) {
+        'setVolume' {
+            if($volume -gt $limit) {
+                $volume = $limit
+            }
+            Write-Host "Set $deviceName Volume $volume"
+            $envelope = $envelope.Replace("###DESIRED_VOLUME###", $volume)
+        }
+    }
+ 
+    # Create SOAP Request
+    $soapRequest = [System.Net.WebRequest]::Create($uri)
+ 
+    # Set Headers
+    $soapRequest.Accept = 'gzip'
+    $soapRequest.Method = 'POST'
+    $soapRequest.ContentType = 'text/xml; charset="utf-8"'
+    $soapRequest.KeepAlive = $false
+    $soapRequest.Headers.Add("SOAPACTION", $soapAction)
+ 
+    # Sending SOAP Request
+    $requestStream = $soapRequest.GetRequestStream()
+    $envelope = [xml] $envelope
+    $envelope.Save($requestStream)
+    $requestStream.Close()
+ 
+    # Sending Complete, Get Response
+    $response = $soapRequest.GetResponse()
+    $responseStream = $response.GetResponseStream()
+    $soapReader = [System.IO.StreamReader]($responseStream)
+    $returnXml = [Xml] $soapReader.ReadToEnd()
+    $responseStream.Close()
+    if($action -eq 'GetVolume') {
+        $currentVolume = ($returnXml  | select-xml -xpath "//CurrentVolume").toString()
+        Write-Host "Current volume of $deviceName is $currentVolume"
+        if($monitor -eq $true -and $currentVolume -gt $limit) {
+            Write-Host "This is above the volume limit of $limit"
+            Set-Sonos "SetVolume" $device $limit
+        }
+    }
+}
+ 
+ 
+# all this does is continuously poll the devices and sets the volume back to volume limit
+# if they go above the limits set above
+if($auto) {
+ 
+   while(1) {
+       # keep importing the devices so we can change the limits externally
+       $devices = Import-Csv devices.txt
+       $i = 1;
+      foreach($device in $devices) {
+        Set-Sonos "GetVolume" $i -monitor $true
+        $i++;
+       }
+       Start-sleep -seconds $pollRate
+   }
+ 
+} else {
+ 
+ 
+    Write-Host "###############################################################"
+    Write-Host "#                                                             #"
+    Write-Host "#                   SONOS Volume Controller                   #"
+    Write-Host "#                                                             #"
+    Write-Host "###############################################################"
+    Write-Host ""
+    Write-Host "Devices:"
+    $i = 1;
+    foreach($device in $devices) {
+        Write-Host "[$i] $($device.Name)"
+        $i++
+    }
+    Write-Host "----------------"
+    Write-Host ""
+    Write-Host "Options:"
+ 
+    foreach($command in $commands.GetEnumerator()) {
+        Write-Host "[$($command.key)] $($command.value)"
+    }
+ 
+    Write-Host "----------------"
+    Write-Host ""
+ 
+   $device = Read-Host "Please select a device (by number)"
+ 
+   $action = Read-Host "Please select an action (by number)"
+ 
+   $action = $commands["$action"]
+ 
+   if($action -eq "SetVolume") {
+     $volume = Read-Host "Enter Volume (1-50)"
+   } else {
+     $volume = ""
+   }
+ 
+   Set-Sonos $action $device $volume
+ 
+}
